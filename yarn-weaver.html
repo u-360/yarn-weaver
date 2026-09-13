@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>毛线编织者 Yarn Weaver</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none; -webkit-user-select:none; }
+  html,body { width:100%; height:100%; overflow:hidden; }
+  body { display:flex; justify-content:center; align-items:center; background:#000; }
+  #app { position:relative; width:100vw; height:100dvh; max-width:500px; max-height:100dvh; overflow:hidden; }
+  canvas { display:block; width:100%; height:100%; }
+
+  /* HUD */
+  #hud {
+    position:absolute; top:0; left:0; right:0;
+    display:flex; justify-content:space-between; align-items:center;
+    padding: env(safe-area-inset-top, 8px) 16px 8px;
+    z-index:10; pointer-events:none;
+  }
+  .hud-box {
+    background: rgba(255,255,255,0.06);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    border-radius: 16px; padding: 5px 12px;
+    color: rgba(255,255,255,0.7); font-size: 12px; font-weight: 500;
+  }
+  .hud-score { font-size:18px; color:#fff; font-weight:700; }
+  #beatIndicator {
+    position:absolute; bottom: env(safe-area-inset-bottom, 20px); left:50%; transform:translateX(-50%);
+    display:flex; gap:4px; z-index:10; pointer-events:none;
+  }
+  .beat-dot {
+    width:8px; height:8px; border-radius:50%; background:rgba(255,255,255,0.15);
+    transition: all 0.15s;
+  }
+  .beat-dot.active { background:#fff; transform:scale(1.8); box-shadow:0 0 12px rgba(255,255,255,0.5); }
+
+  /* 底部控制 */
+  #controls {
+    position:absolute; bottom: env(safe-area-inset-bottom, 40px); left:0; right:0;
+    display:flex; justify-content:center; gap:10px;
+    padding: 0 16px; z-index:10;
+  }
+  .ctrl-btn {
+    width: 44px; height: 44px; border-radius:50%; border:none;
+    background: rgba(255,255,255,0.08);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    color: rgba(255,255,255,0.6); font-size: 18px;
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer; transition: all 0.2s;
+  }
+  .ctrl-btn:active { transform:scale(0.9); }
+  .ctrl-btn.on { background:rgba(255,255,255,0.2); color:#fff; }
+
+  /* 覆盖层 */
+  #overlay {
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    background: rgba(0,0,0,0.92);
+    display:flex; flex-direction:column; justify-content:center; align-items:center;
+    z-index:100; padding:30px; text-align:center;
+  }
+  #overlay.hide { display:none !important; }
+  #overlay h1 {
+    font-size: 32px; margin-bottom:6px;
+    background: linear-gradient(135deg, #FF6B9D, #C084FC, #67E8F9);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+    background-clip:text;
+  }
+  #overlay h2 { font-size:13px; color:rgba(255,255,255,0.4); margin-bottom:24px; font-weight:400; }
+  #overlay .desc { font-size:12px; color:rgba(255,255,255,0.35); line-height:1.8; margin-bottom:20px; max-width:300px; }
+  .start-btn {
+    padding:14px 44px; border:none; border-radius:28px;
+    font-size:16px; font-weight:700; color:#fff;
+    background:linear-gradient(135deg, #667eea, #764ba2);
+    box-shadow:0 4px 20px rgba(102,126,234,0.3);
+    cursor:pointer;
+  }
+  .start-btn:active { transform:scale(0.95); }
+
+  /* 结束页 */
+  #endScreen {
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    background: rgba(0,0,0,0.92);
+    display:none; flex-direction:column; justify-content:center; align-items:center;
+    z-index:100; padding:30px; text-align:center;
+  }
+  #endScreen.show { display:flex; }
+  #endScreen h2 { font-size:24px; color:#fff; margin-bottom:6px; }
+  .end-score { font-size:48px; font-weight:900; color:#fff; margin:8px 0; }
+  .end-msg { font-size:13px; color:rgba(255,255,255,0.4); margin-bottom:16px; max-width:280px; line-height:1.6; }
+  .pattern-name { font-size:14px; color:rgba(255,255,255,0.6); margin-bottom:16px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="gameCanvas"></canvas>
+
+  <div id="hud">
+    <div class="hud-box">🧶 <span id="lengthDisplay">0m</span></div>
+    <div class="hud-box hud-score" id="scoreDisplay">0</div>
+    <div class="hud-box" id="timeDisplay">2:00</div>
+  </div>
+
+  <div id="beatIndicator">
+    <div class="beat-dot"></div><div class="beat-dot"></div>
+    <div class="beat-dot"></div><div class="beat-dot"></div>
+    <div class="beat-dot"></div><div class="beat-dot"></div>
+    <div class="beat-dot"></div><div class="beat-dot"></div>
+  </div>
+
+  <div id="controls">
+    <button class="ctrl-btn on" id="btnGravity" title="重力">📐</button>
+    <button class="ctrl-btn" id="btnColor" title="换色">🎨</button>
+    <button class="ctrl-btn" id="btnPause" title="暂停">⏸</button>
+  </div>
+
+  <div id="overlay">
+    <h1>🧶 毛线编织者</h1>
+    <h2>Yarn Weaver</h2>
+    <div class="desc">
+      引导毛线球编织美丽图案<br>
+      倾斜手机或滑动屏幕<br>
+      在节奏中寻找心流<br>
+      今日挑战：螺旋纹
+    </div>
+    <button class="start-btn" id="startBtn">开始编织 ✨</button>
+  </div>
+
+  <div id="endScreen">
+    <h2>编织完成！</h2>
+    <div class="end-score" id="finalScore">0</div>
+    <div class="pattern-name" id="finalPattern"></div>
+    <div class="end-msg" id="finalMsg"></div>
+    <button class="start-btn" id="restartBtn">再来一次 ✨</button>
+  </div>
+</div>
+
+<script>
+// ==================== 配置 ====================
+const YARN_COLORS = [
+  '#FF6B9D', '#C084FC', '#67E8F9', '#FBBF24', '#34D399',
+  '#F97316', '#EF4444', '#8B5CF6', '#06B6D4', '#EC4899',
+  '#F59E0B', '#10B981', '#6366F1', '#D946EF', '#14B8A6'
+];
+
+const PATTERNS = [
+  { name: '螺旋纹', desc: '画出一个完美的螺旋' },
+  { name: '波浪纹', desc: '编织流畅的波浪' },
+  { name: '同心圆', desc: '一圈圈向外扩散' },
+  { name: '星星', desc: '画出闪烁的星光' },
+  { name: '心形', desc: '编织一颗温暖的心' },
+  { name: '雪花', desc: '创作冬日雪花' },
+  { name: '藤蔓', desc: '缠绕生命藤蔓' },
+  { name: '彩虹', desc: '编织七彩光芒' },
+];
+
+// ==================== 全局 ====================
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+let gameState = 'menu'; // menu, playing, paused, ended
+let yarnBall = { x:0, y:0, vx:0, vy:0, radius:12 };
+let yarnPath = []; // [{x,y, color}]
+let yarnSegments = []; // [{points:[], color, alpha}]
+let currentColorIdx = 0;
+let score = 0, length = 0;
+let timeLeft = 120;
+let beatIndex = 0;
+let beatInterval = 500; // 120 BPM
+let lastBeatTime = 0;
+
+let useGravity = true;
+let tiltX = 0, tiltY = 0;
+let touchX = 0, touchY = 0;
+let isTouching = false;
+let audioCtx = null;
+
+let frameCount = 0;
+let lastFrameTime = 0;
+const TARGET_FPS = 30;
+const FRAME_TIME = 1000 / TARGET_FPS;
+
+let gravitySupported = false;
+let currentPattern = 0;
+
+// ==================== Canvas ====================
+function resize() {
+  const app = document.getElementById('app');
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = app.clientWidth;
+  H = app.clientHeight;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ==================== 毛线球 ====================
+class YarnBall {
+  constructor() {
+    this.x = W / 2;
+    this.y = H / 2;
+    this.radius = 14;
+    this.vx = 0;
+    this.vy = 0;
+    this.friction = 0.95;
+    this.tiltForce = 0.15;
+  }
+
+  update(dt) {
+    if (useGravity && gravitySupported) {
+      // 重力感应
+      this.vx += tiltX * this.tiltForce * dt;
+      this.vy += tiltY * this.tiltForce * dt;
+    }
+
+    if (isTouching) {
+      // 触屏引导 - 毛线球朝向手指方向
+      const dx = touchX - this.x;
+      const dy = touchY - this.y;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      if (dist > 5) {
+        this.vx += (dx / dist) * 0.3 * dt;
+        this.vy += (dy / dist) * 0.3 * dt;
+      }
+    }
+
+    // 摩擦力
+    this.vx *= this.friction;
+    this.vy *= this.friction;
+
+    // 位置更新
+    this.x += this.vx * dt * 0.06;
+    this.y += this.vy * dt * 0.06;
+
+    // 边界反弹
+    if (this.x < this.radius) { this.x = this.radius; this.vx *= -0.5; }
+    if (this.x > W - this.radius) { this.x = W - this.radius; this.vx *= -0.5; }
+    if (this.y < this.radius) { this.y = this.radius; this.vy *= -0.5; }
+    if (this.y > H - this.radius) { this.y = H - this.radius; this.vy *= -0.5; }
+
+    // 记录轨迹
+    yarnPath.push({ x: this.x, y: this.y });
+
+    // 长度计算
+    if (yarnPath.length > 1) {
+      const last = yarnPath[yarnPath.length - 2];
+      const curr = yarnPath[yarnPath.length - 1];
+      const d = Math.sqrt((curr.x-last.x)**2 + (curr.y-last.y)**2);
+      length += d;
+    }
+
+    // 速度决定得分
+    const speed = Math.sqrt(this.vx*this.vx + this.vy*this.vy);
+    if (speed > 0.5) {
+      score += Math.floor(speed * dt * 0.01);
+    }
+
+    // 每10帧切换一次颜色（彩虹效果）
+    if (frameCount % 10 === 0 && yarnPath.length > 0) {
+      currentColorIdx = (currentColorIdx + 1) % YARN_COLORS.length;
+    }
+  }
+
+  draw(ctx) {
+    // 毛线球 - 多层纹理
+    ctx.save();
+    ctx.translate(this.x, this.y);
+
+    // 发光
+    const glow = ctx.createRadialGradient(0, 0, this.radius*0.5, 0, 0, this.radius*2);
+    glow.addColorStop(0, YARN_COLORS[currentColorIdx] + '44');
+    glow.addColorStop(1, 'transparent');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, 0, this.radius*2, 0, Math.PI*2);
+    ctx.fill();
+
+    // 球体
+    const grad = ctx.createRadialGradient(-3, -3, 1, 0, 0, this.radius);
+    const col = YARN_COLORS[currentColorIdx];
+    grad.addColorStop(0, '#fff');
+    grad.addColorStop(0.3, col);
+    grad.addColorStop(1, col + '88');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(0, 0, this.radius, 0, Math.PI*2);
+    ctx.fill();
+
+    // 毛线纹理 - 螺旋线
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      const offset = (frameCount * 0.02 + i * Math.PI * 2/3) % (Math.PI*2);
+      for (let a = 0; a < Math.PI*2; a += 0.2) {
+        const r = this.radius * 0.3 + a * 2;
+        const px = Math.cos(a + offset) * r;
+        const py = Math.sin(a + offset) * r;
+        if (a === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+}
+
+let ball = null;
+
+// ==================== 毛线轨迹绘制 ====================
+function drawYarnTrails() {
+  if (yarnPath.length < 2) return;
+
+  const color = YARN_COLORS[currentColorIdx];
+
+  // 将路径分段，每段用不同颜色或透明度
+  const segmentLength = 100; // 每100个点一段
+  let segStart = 0;
+
+  while (segStart < yarnPath.length) {
+    const segEnd = Math.min(segStart + segmentLength, yarnPath.length);
+    const seg = yarnPath.slice(segStart, segEnd);
+
+    if (seg.length >= 2) {
+      // 渐变段
+      const segColorIdx = Math.floor(segStart / segmentLength) % YARN_COLORS.length;
+      const segColor = YARN_COLORS[segColorIdx];
+
+      // 毛线效果 - 双线加粗
+      ctx.save();
+      ctx.strokeStyle = segColor;
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.globalAlpha = 0.8;
+
+      // 外发光
+      ctx.shadowColor = segColor;
+      ctx.shadowBlur = 6;
+
+      ctx.beginPath();
+      ctx.moveTo(seg[0].x, seg[0].y);
+      for (let i = 1; i < seg.length; i++) {
+        ctx.lineTo(seg[i].x, seg[i].y);
+      }
+      ctx.stroke();
+
+      // 内部高光
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.4;
+      ctx.beginPath();
+      ctx.moveTo(seg[0].x, seg[0].y);
+      for (let i = 1; i < seg.length; i++) {
+        ctx.lineTo(seg[i].x, seg[i].y);
+      }
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    segStart = segEnd;
+  }
+
+  // 绘制节点装饰（每隔一段距离画一个小毛球）
+  for (let i = Math.min(200, yarnPath.length); i < yarnPath.length; i += 30) {
+    const p = yarnPath[i];
+    const idx = Math.floor(i / 30) % YARN_COLORS.length;
+    ctx.save();
+    ctx.globalAlpha = 0.6;
+    ctx.fillStyle = YARN_COLORS[idx];
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 2, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+// ==================== 背景网格 ====================
+function drawBackground() {
+  // 纯黑背景（OLED省电）
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+
+  // 微弱网格
+  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+  ctx.lineWidth = 0.5;
+  const gridSize = 40;
+  for (let x = 0; x < W; x += gridSize) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  for (let y = 0; y < H; y += gridSize) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+
+  // 中心光晕
+  const centerGlow = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, W*0.4);
+  centerGlow.addColorStop(0, 'rgba(255,255,255,0.02)');
+  centerGlow.addColorStop(1, 'transparent');
+  ctx.fillStyle = centerGlow;
+  ctx.fillRect(0, 0, W, H);
+}
+
+// ==================== 节拍系统 ====================
+function updateBeat(timestamp) {
+  if (timestamp - lastBeatTime >= beatInterval) {
+    lastBeatTime = timestamp;
+    beatIndex = (beatIndex + 1) % 8;
+    updateBeatIndicator();
+
+    // 节拍音效
+    playBeatSound();
+  }
+}
+
+function updateBeatIndicator() {
+  const dots = document.querySelectorAll('.beat-dot');
+  dots.forEach((dot, i) => {
+    dot.classList.toggle('active', i === beatIndex);
+  });
+}
+
+function playBeatSound() {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = 800;
+  gain.gain.setValueAtTime(0.05, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  osc.start(t); osc.stop(t + 0.05);
+}
+
+// ==================== 每日挑战 ====================
+function getDailyPattern() {
+  // 基于日期生成固定选择
+  const now = new Date();
+  const dayNum = Math.floor((now - new Date(now.getFullYear(), 0, 1)) / 86400000);
+  return dayNum % PATTERNS.length;
+}
+
+// ==================== 游戏循环 ====================
+function gameLoop(timestamp) {
+  if (!lastFrameTime) lastFrameTime = timestamp;
+  const delta = timestamp - lastFrameTime;
+
+  if (delta >= FRAME_TIME) {
+    lastFrameTime = timestamp - (delta % FRAME_TIME);
+
+    if (gameState === 'playing') {
+      frameCount++;
+      updateBeat(timestamp);
+      ball.update(delta);
+      draw(timestamp);
+    }
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+
+function draw(timestamp) {
+  drawBackground();
+  drawYarnTrails();
+  ball.draw(ctx);
+
+  // 更新UI
+  document.getElementById('scoreDisplay').textContent = score;
+  document.getElementById('lengthDisplay').textContent = Math.floor(length / 100) + 'm';
+}
+
+// ==================== 输入 ====================
+// 重力感应
+function handleOrientation(e) {
+  tiltX = e.gamma || 0; // -90 to 90 (left/right)
+  tiltY = e.beta || 0;  // -180 to 180 (front/back)
+  // 限制范围
+  tiltX = Math.max(-30, Math.min(30, tiltX)) / 30;
+  tiltY = Math.max(-30, Math.min(30, tiltY)) / 30;
+}
+
+function requestGravity() {
+  if (window.DeviceOrientationEvent) {
+    window.addEventListener('deviceorientation', handleOrientation);
+    gravitySupported = true;
+    document.getElementById('btnGravity').classList.add('on');
+  }
+}
+
+// 触屏
+canvas.addEventListener('touchstart', e => {
+  if (gameState !== 'playing') return;
+  isTouching = true;
+  const rect = canvas.getBoundingClientRect();
+  touchX = (e.touches[0].clientX - rect.left) * (W / rect.width);
+  touchY = (e.touches[0].clientY - rect.top) * (H / rect.height);
+  e.preventDefault();
+}, { passive: false });
+
+canvas.addEventListener('touchmove', e => {
+  if (!isTouching || gameState !== 'playing') return;
+  const rect = canvas.getBoundingClientRect();
+  touchX = (e.touches[0].clientX - rect.left) * (W / rect.width);
+  touchY = (e.touches[0].clientY - rect.top) * (H / rect.height);
+  e.preventDefault();
+}, { passive: false });
+
+canvas.addEventListener('touchend', () => { isTouching = false; });
+canvas.addEventListener('touchcancel', () => { isTouching = false; });
+
+// 鼠标（电脑端）
+let mouseDown = false;
+canvas.addEventListener('mousedown', e => {
+  if (gameState !== 'playing') return;
+  mouseDown = true;
+  isTouching = true;
+  const rect = canvas.getBoundingClientRect();
+  touchX = (e.clientX - rect.left) * (W / rect.width);
+  touchY = (e.clientY - rect.top) * (H / rect.height);
+});
+canvas.addEventListener('mousemove', e => {
+  if (!mouseDown || gameState !== 'playing') return;
+  const rect = canvas.getBoundingClientRect();
+  touchX = (e.clientX - rect.left) * (W / rect.width);
+  touchY = (e.clientY - rect.top) * (H / rect.height);
+});
+canvas.addEventListener('mouseup', () => { mouseDown = false; isTouching = false; });
+canvas.addEventListener('mouseleave', () => { mouseDown = false; isTouching = false; });
+
+// ==================== 控制 ====================
+function startGame() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  gameState = 'playing';
+  score = 0; length = 0; currentColorIdx = 0; timeLeft = 120; beatIndex = 0; frameCount = 0;
+  yarnPath = [];
+  ball = new YarnBall();
+
+  // 随机选择今日图案
+  currentPattern = getDailyPattern();
+
+  document.getElementById('overlay').classList.add('hide');
+  document.getElementById('endScreen').classList.remove('show');
+  lastBeatTime = performance.now();
+
+  // 倒计时
+  if (game._interval) clearInterval(game._interval);
+  game._interval = setInterval(() => {
+    if (gameState !== 'playing') return;
+    timeLeft--;
+    const min = Math.floor(timeLeft / 60);
+    const sec = timeLeft % 60;
+    document.getElementById('timeDisplay').textContent = `${min}:${sec.toString().padStart(2,'0')}`;
+    if (timeLeft <= 0) endGame();
+  }, 1000);
+}
+
+function endGame() {
+  gameState = 'ended';
+  if (game._interval) { clearInterval(game._interval); game._interval = null; }
+
+  document.getElementById('finalScore').textContent = score;
+  document.getElementById('finalPattern').textContent = `今日挑战：${PATTERNS[currentPattern].name} - ${PATTERNS[currentPattern].desc}`;
+  let msg = '';
+  if (score < 2000) msg = '编织出一条温暖的线 🧶';
+  else if (score < 5000) msg = '图案越来越美了 ✨';
+  else if (score < 10000) msg = '你是天生的编织大师！🌟';
+  else msg = '完美的艺术作品！👑';
+  document.getElementById('finalMsg').textContent = msg;
+  document.getElementById('endScreen').classList.add('show');
+}
+
+function togglePause() {
+  if (gameState === 'playing') {
+    gameState = 'paused';
+    document.getElementById('btnPause').textContent = '▶️';
+  } else if (gameState === 'paused') {
+    gameState = 'playing';
+    document.getElementById('btnPause').textContent = '⏸';
+    lastFrameTime = 0; // reset timer
+  }
+}
+
+document.getElementById('startBtn').onclick = startGame;
+document.getElementById('restartBtn').onclick = startGame;
+document.getElementById('btnPause').onclick = togglePause;
+document.getElementById('btnGravity').onclick = function() {
+  useGravity = !useGravity;
+  this.classList.toggle('on', useGravity);
+  if (useGravity) requestGravity();
+};
+document.getElementById('btnColor').onclick = function() {
+  currentColorIdx = (currentColorIdx + 1) % YARN_COLORS.length;
+};
+
+// 初始化
+requestGravity();
+requestAnimationFrame(gameLoop);
+const game = {};
+</script>
+</body>
+</html>
